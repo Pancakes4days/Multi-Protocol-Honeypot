@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  honeypot:
+    build: .
+    container_name: minecraft-honeypot
+    ports:
+      - "25565:25565"
+    volumes:
+      - ./logs:/logs
+    restart: unless-stopped
+    environment:
+      - TZ=UTC
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
