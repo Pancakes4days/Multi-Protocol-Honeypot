@@ -1,380 +1,167 @@
-# 🍯 Minecraft Honeypot
+# Multi-Protocol Honeypot
 
-A complete Minecraft server honeypot for learning about network security and attack patterns.
+A Dockerized honeypot server that emulates a Minecraft game server to capture and analyze real-world network reconnaissance and attack traffic. Deployed on a VPS and exposed on the standard Minecraft port (25565), it passively collects connection attempts from automated scanners, login bots, and exploit probes without running any actual game logic.
 
-## What's Included
+## Architecture
 
-- **Minecraft Honeypot Server**: Python-based fake Minecraft server
-- **Docker Setup**: Containerized for safety and easy deployment
-- **Log Analysis Tool**: Analyze attack patterns and statistics
-- **Attack Simulator**: Test your own honeypot safely
+- **`minecraft_honeypot.py`** — Core honeypot server. Speaks enough of the Minecraft protocol to satisfy a connecting client through the handshake phase, then logs and drops the connection. Never executes any game state.
+- **`analyze_logs.py`** — Log analysis tool. Parses the structured JSONL connection log and reports connection volume, top source IPs, protocol versions, connection types, and attack timelines.
+- **`attack_simulator.py`** — Local test harness. Fires five distinct probe types against a target IP so you can verify honeypot behavior without waiting for organic traffic.
+- **`Dockerfile` / `docker-compose.yml`** — Container setup. Isolates the honeypot process from the host; the only exposure is port 25565.
 
-## Quick Start
+## Deployment
 
-### 1. Upload Files to Your VPS
+### 1. Transfer files to your VPS
 
 ```bash
-# On your personal computer, in the directory with the files:
 scp minecraft_honeypot.py Dockerfile docker-compose.yml honeypot@YOUR_VPS_IP:~/
 scp analyze_logs.py attack_simulator.py honeypot@YOUR_VPS_IP:~/
 ```
 
-### 2. SSH into Your VPS
+### 2. Build and start
 
 ```bash
-ssh honeypot@YOUR_VPS_IP
-```
-
-### 3. Build and Start the Honeypot
-
-```bash
-# Build the Docker image
 docker-compose build
-
-# Start the honeypot
 docker-compose up -d
-
-# Check it's running
-docker ps
+docker ps   # confirm the container is running
 ```
 
-You should see:
+Expected output:
 ```
-CONTAINER ID   IMAGE                    STATUS         PORTS
-abc123def456   minecraft-honeypot       Up 2 seconds   0.0.0.0:25565->25565/tcp
+CONTAINER ID   IMAGE               STATUS         PORTS
+abc123def456   minecraft-honeypot  Up 2 seconds   0.0.0.0:25565->25565/tcp
 ```
 
-### 4. Watch Real-Time Logs
+### 3. Monitor live traffic
 
 ```bash
-# Follow live logs
 docker logs -f minecraft-honeypot
-
-# Or just check recent logs
-docker logs minecraft-honeypot --tail 50
 ```
 
-## Analyzing Attacks
+## Log Analysis
 
-### View Statistics
+Logs are written to `logs/` inside the container, mounted to the host:
+
+| File | Format | Contents |
+|---|---|---|
+| `logs/honeypot.log` | Plain text | Human-readable event stream |
+| `logs/connections.jsonl` | JSONL | One JSON object per connection — source IP, timestamp, protocol version, connection type, errors |
+
+### Running the analyzer
 
 ```bash
-# Make the analyzer executable
-chmod +x analyze_logs.py
-
-# Run analysis
-python3 analyze_logs.py
+python3 analyze_logs.py           # summary report
+python3 analyze_logs.py recent 20 # last 20 connections in detail
 ```
 
-**Output includes:**
-- Total connections
-- Top source IPs
-- Protocol versions seen
-- Connection types (status vs login)
-- Timeline of attacks
+Sample output after 24 hours of exposure:
 
-### View Recent Connections
+```
+MINECRAFT HONEYPOT - LOG ANALYSIS
+======================================================================
 
-```bash
-# Show last 10 connections in detail
-python3 analyze_logs.py recent 10
+Total Connections: 127
 
-# Show last 20
-python3 analyze_logs.py recent 20
+Top Source IPs:
+  185.220.101.45    -  23 connections
+  192.42.116.186    -  15 connections
+  167.99.84.203     -  12 connections
+
+Unique IPs: 89
+
+Connection Types:
+  Status   -  98 connections
+  Login    -  29 connections
 ```
 
-## Testing Your Honeypot
-
-### Simulate Attacks from Your Computer
+### Useful queries against the JSONL log
 
 ```bash
-# Make simulator executable
-chmod +x attack_simulator.py
+# IPs that only issued status pings (scanner bots)
+grep "next_state_name.*status" logs/connections.jsonl
 
-# Test from your personal computer (NOT the VPS):
+# Login attempts
+grep "next_state_name.*login" logs/connections.jsonl
+
+# Malformed or error-generating packets
+grep "error" logs/connections.jsonl
+
+# Unique source IPs
+jq -r '.source_ip' logs/connections.jsonl | sort -u
+
+# Daily connection volume
+jq -r '.timestamp' logs/connections.jsonl | cut -d'T' -f1 | sort | uniq -c
+```
+
+## Testing
+
+Run the attack simulator from a separate machine (not the VPS itself) to verify all probe types are captured:
+
+```bash
 python3 attack_simulator.py YOUR_VPS_IP
 ```
 
-This runs 5 different attack simulations:
-1. **Server List Ping** - Normal Minecraft client behavior
-2. **Login Attempt** - Trying to join the server
-3. **Old Protocol** - Using outdated Minecraft version
-4. **Malformed Packet** - Sending garbage data
-5. **Rapid Connections** - Multiple quick connections
+This fires five probe types:
+1. **Server List Ping** — standard status handshake
+2. **Login Attempt** — full login sequence initiation
+3. **Old Protocol** — outdated client version
+4. **Malformed Packet** — garbage payload
+5. **Rapid Connections** — burst of quick successive connects
 
-### Using Actual Minecraft Client
+You can also connect with the real Minecraft client by adding `YOUR_VPS_IP:25565` as a server — the honeypot will appear in the server list and log the attempt.
 
-You can also test with the real Minecraft game:
-
-1. Open Minecraft
-2. Go to Multiplayer
-3. Add Server: `YOUR_VPS_IP:25565`
-4. The server will appear in your list!
-5. Try to connect
-
-All connection attempts are logged!
-
-## Log Files
-
-Logs are stored in the `logs/` directory:
-
-- **`logs/honeypot.log`** - Human-readable logs
-- **`logs/connections.jsonl`** - Structured JSON data (one connection per line)
-
-### View Raw Logs
+## Management
 
 ```bash
-# View main log file
-cat logs/honeypot.log
-
-# View JSON connection data
-cat logs/connections.jsonl | jq .
-
-# Count total connections
-wc -l logs/connections.jsonl
-```
-
-## What You'll Learn
-
-After running this for a few days, you'll discover:
-
-### 1. Attack Frequency
-- How quickly bots find new servers
-- Geographic distribution of attackers
-- Peak attack times
-
-### 2. Common Patterns
-- Scanner bots checking server status
-- Login attempt patterns
-- Exploit attempts (e.g., Log4Shell)
-
-### 3. Attacker Behavior
-- Protocol versions used
-- Connection sequences
-- Automated vs manual attempts
-
-##  Management Commands
-
-### Stop the Honeypot
-```bash
+# Stop
 docker-compose down
-```
-
-### Restart the Honeypot
-```bash
-docker-compose restart
-```
-
-### Rebuild After Changes
-```bash
-docker-compose down
-docker-compose build
-docker-compose up -d
-```
-
-### Clear Logs
-```bash
-# Stop honeypot first
-docker-compose down
-
-# Clear logs
-rm -rf logs/*
 
 # Restart
-docker-compose up -d
-```
+docker-compose restart
 
-### View Resource Usage
-```bash
+# Rebuild after code changes
+docker-compose down && docker-compose build && docker-compose up -d
+
+# Clear logs (stop first)
+docker-compose down && rm -rf logs/* && docker-compose up -d
+
+# Resource usage
 docker stats minecraft-honeypot
-```
 
-##  Cost Management
-
-### Check How Long It's Been Running
-```bash
-# See container uptime
-docker ps
-```
-
-### Stop When Not Needed
-```bash
-# Stop but keep data
-docker-compose down
-
-# Restart later
-docker-compose up -d
-```
-
-### Complete Cleanup
-```bash
-# Stop and remove everything
-docker-compose down
-docker system prune -a
-
-# Your logs are still in logs/ directory
-# Back them up before destroying the VPS!
-```
-
-## Downloading Logs to Your Computer
-
-```bash
-# From your personal computer:
+# Download logs to local machine
 scp -r honeypot@YOUR_VPS_IP:~/logs ./honeypot-logs
-
-# Then analyze locally:
-python3 analyze_logs.py honeypot-logs/connections.jsonl
 ```
-
-## Security Notes
-
-###  What's Safe
-- Running this honeypot in Docker
-- Exposing port 25565
-- Analyzing the attacks
-- Learning from the data
-
-###  Be Careful
-- Don't run other services on this VPS
-- Monitor for DoS attacks (high bandwidth usage)
-- Check DigitalOcean billing regularly
-- Don't store sensitive data on this server
-
-###  Don't Do This
-- Don't attack others from this server
-- Don't use the data for illegal purposes
-- Don't ignore bandwidth costs
-- Don't expose your personal computer
-
-##  Interesting Things to Look For
-
-### 1. Scanner Bots
-```bash
-# Look for IPs that only do status checks
-grep "next_state_name.*status" logs/connections.jsonl
-```
-
-### 2. Login Attempts
-```bash
-# Find login attempts
-grep "next_state_name.*login" logs/connections.jsonl
-```
-
-### 3. Unique Exploit Attempts
-```bash
-# Check for unusual packets
-grep "error" logs/connections.jsonl
-```
-
-## Advanced Analysis
-
-### Geographic Location of Attackers
-
-Use online IP lookup services:
-```bash
-# Extract unique IPs
-cat logs/connections.jsonl | jq -r '.source_ip' | sort -u
-
-# Then look them up at: https://ipinfo.io/YOUR_IP
-```
-
-### Attack Timeline Visualization
-
-```bash
-# Extract timestamps
-cat logs/connections.jsonl | jq -r '.timestamp' | cut -d'T' -f1 | sort | uniq -c
-```
-
-## Learning Resources
-
-### Understanding What You're Seeing
-
-- **Port scanners**: Automated tools checking for open ports
-- **Minecraft scanners**: Bots specifically looking for Minecraft servers
-- **Exploit attempts**: Trying known vulnerabilities (like Log4Shell)
-- **Brute force**: Trying to connect repeatedly
-
-### Real-World Application
-
-Use this knowledge to:
-- Understand how to secure real servers
-- Implement rate limiting
-- Configure firewalls effectively
-- Detect suspicious activity
-- Use fail2ban or similar tools
 
 ## Troubleshooting
 
-### Honeypot Won't Start
+**Container won't start**
 ```bash
-# Check if port is already in use
-sudo netstat -tulpn | grep 25565
-
-# Check Docker logs
-docker logs minecraft-honeypot
+sudo netstat -tulpn | grep 25565   # check if port is already bound
+docker logs minecraft-honeypot     # inspect startup errors
 ```
 
-### No Attacks Showing Up
-- Wait 24-48 hours (scanners need time to find you)
-- Verify firewall: `sudo ufw status`
-- Test manually: `python3 attack_simulator.py YOUR_VPS_IP`
+**No traffic after deployment**
+- Internet scanners typically find new IPs within 24–48 hours
+- Verify the port is reachable: `python3 attack_simulator.py YOUR_VPS_IP`
+- Check the firewall: `sudo ufw status`
 
-### Container Keeps Restarting
+**Container restart loop**
 ```bash
-# Check error logs
 docker logs minecraft-honeypot --tail 100
-
-# Rebuild container
-docker-compose down
-docker-compose build --no-cache
-docker-compose up -d
+docker-compose down && docker-compose build --no-cache && docker-compose up -d
 ```
 
-## Sample Output
+## Security Considerations
 
-After running for 24 hours, you might see:
+- The honeypot runs fully inside Docker with no shared volumes beyond `logs/`
+- Port 25565 is the only exposed surface
+- Do not run additional services on the same VPS
+- Monitor bandwidth; high-volume DoS probes can generate significant egress
 
-```
- MINECRAFT HONEYPOT - LOG ANALYSIS
-======================================================================
+## Next Steps
 
- Total Connections: 127
-
- Top Source IPs:
-   185.220.101.45       -  23 connections
-   192.42.116.186       -  15 connections
-   167.99.84.203        -  12 connections
-
-🔢 Unique IPs: 89
-
- Connection Types:
-   Status     -  98 connections
-   Login      -  29 connections
-```
-
-##  Next Steps
-
-Once comfortable with this basic honeypot:
-
-1. **Add more logging** - Capture full packet data
-2. **Create alerts** - Get notified of suspicious activity
-3. **Deploy multiple honeypots** - Compare different locations
-4. **Integrate with ELK stack** - Advanced log analysis
-5. **Research specific exploits** - Learn about CVEs
-
-##  License & Disclaimer
-
-This is for **educational purposes only**. 
-
-- Use responsibly
-- Don't attack others
-- Respect privacy laws
-- Follow DigitalOcean's terms of service
-
-## Contributing
-
-Found ways to improve this honeypot? Great! Consider:
-- Adding more packet analysis
-- Improving logging format
-- Creating visualization tools
-- Documenting attack patterns
+- Capture and store full packet payloads for deeper protocol analysis
+- Add alerting (email/webhook) for high-frequency source IPs
+- Integrate with an ELK stack or Grafana for time-series visualization
+- Deploy instances across multiple regions to compare geographic attack patterns
+- Cross-reference source IPs against known threat intelligence feeds
