@@ -4,13 +4,33 @@ services:
   honeypot:
     build: .
     container_name: minecraft-honeypot
+    # Bind only the honeypot port. This is the single intended exposure.
     ports:
       - "25565:25565"
     volumes:
+      # Logs are the only writable path on the host; keep them out of the
+      # container's root filesystem.
       - ./logs:/logs
     restart: unless-stopped
     environment:
       - TZ=UTC
+
+    # --- Container hardening --------------------------------------------------
+    # The honeypot deliberately attracts hostile traffic, so the blast radius
+    # of any bug must be as small as possible.
+    read_only: true                 # immutable root filesystem
+    cap_drop:
+      - ALL                         # no Linux capabilities at all
+    security_opt:
+      - no-new-privileges:true      # block setuid privilege escalation
+    tmpfs:
+      - /tmp:size=16m,mode=1777     # small scratch space, non-persistent
+
+    # Resource caps so a flood can't exhaust the host.
+    mem_limit: 256m
+    pids_limit: 256
+    cpus: 0.5
+
     logging:
       driver: "json-file"
       options:
