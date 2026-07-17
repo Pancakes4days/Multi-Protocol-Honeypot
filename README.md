@@ -2,14 +2,18 @@
 
 A Dockerized honeypot server that emulates a Minecraft game server to capture and analyze real-world network reconnaissance and attack traffic. Deployed on a VPS and exposed on the standard Minecraft port (25565), it passively collects connection attempts from automated scanners, login bots, and exploit probes without running any actual game logic.
 
+> **Scope note:** The repository is named *Multi-Protocol* to reflect the intended direction. Today it emulates a **single protocol — Minecraft**. Additional protocol emulators (SSH, Telnet, HTTP, etc.) are on the roadmap, not yet implemented.
+
 ## Architecture
 
-- **`minecraft_honeypot.py`** — Core honeypot server. Speaks enough of the Minecraft protocol to satisfy a connecting client through the handshake phase, then logs and drops the connection. Never executes any game state.
+- **`minecraft_honeypot.py`** — Core honeypot server. Speaks enough of the Minecraft protocol to satisfy a connecting client through the handshake phase, then logs and drops the connection. Never executes any game state. Each connection is handled in its own thread (bounded by a concurrency cap), so a slow or silent client can't stall the server. Packets are framed by their declared VarInt length — correct even when the client coalesces the handshake and status request into one segment or splits a packet across several — and it completes the status + ping/pong exchange so it looks like a real server.
 - **`analyze_logs.py`** — Log analysis tool. Parses the structured JSONL connection log and reports connection volume, top source IPs, protocol versions, connection types, and attack timelines.
 - **`attack_simulator.py`** — Local test harness. Fires five distinct probe types against a target IP so you can verify honeypot behavior without waiting for organic traffic.
 - **`Dockerfile` / `docker-compose.yml`** — Container setup. Isolates the honeypot process from the host; the only exposure is port 25565.
 
 ## Deployment
+
+> For a guided, script-driven setup (including a DigitalOcean walkthrough and `setup.sh`), see [DEPLOYMENT.md](DEPLOYMENT.md). The steps below are the manual equivalent.
 
 ### 1. Transfer files to your VPS
 
@@ -45,13 +49,15 @@ Logs are written to `logs/` inside the container, mounted to the host:
 | File | Format | Contents |
 |---|---|---|
 | `logs/honeypot.log` | Plain text | Human-readable event stream |
-| `logs/connections.jsonl` | JSONL | One JSON object per connection — source IP, timestamp, protocol version, connection type, errors |
+| `logs/connections.jsonl` | JSONL | One JSON object per connection — source IP/port, timestamp, per-packet summaries, handshake details (protocol version, requested address, next state), any login username, and errors |
 
 ### Running the analyzer
 
 ```bash
-python3 analyze_logs.py           # summary report
-python3 analyze_logs.py recent 20 # last 20 connections in detail
+python3 analyze_logs.py                     # summary report (default log path)
+python3 analyze_logs.py path/to/log.jsonl   # summary of a specific log file
+python3 analyze_logs.py recent 20           # last 20 connections in detail
+python3 analyze_logs.py recent 20 log.jsonl # last 20 from a specific log file
 ```
 
 Sample output after 24 hours of exposure:
@@ -153,13 +159,22 @@ docker-compose down && docker-compose build --no-cache && docker-compose up -d
 
 ## Security Considerations
 
-- The honeypot runs fully inside Docker with no shared volumes beyond `logs/`
-- Port 25565 is the only exposed surface
-- Do not run additional services on the same VPS
+Because the honeypot deliberately attracts hostile traffic, it is hardened to keep the blast radius of any bug as small as possible:
+
+- **Non-root process** — the container runs as an unprivileged `honeypot` user, not root
+- **Immutable root filesystem** — `read_only: true`; `logs/` is the only writable path (plus a small non-persistent `tmpfs` at `/tmp`)
+- **No Linux capabilities** — `cap_drop: ALL` with `no-new-privileges` to block setuid escalation
+- **Resource caps** — `mem_limit`, `pids_limit`, and `cpus` bound the container so a flood can't exhaust the host
+- **Input limits in code** — per-packet (32 KB) and per-connection (64 KB) byte caps, plus a bounded concurrency limit, guard against memory/thread exhaustion
+- **No code execution** — attacker-supplied bytes are only framed and logged, never evaluated
+- Port 25565 is the only exposed surface — do not run additional services on the same VPS
 - Monitor bandwidth; high-volume DoS probes can generate significant egress
+
+> The honeypot reads its log directory from `HONEYPOT_LOG_DIR` (defaults to `/logs`, the container mount). This lets you run it locally for development without touching the container config.
 
 ## Next Steps
 
+- Add emulators for additional protocols (SSH, Telnet, HTTP) to make the "multi-protocol" name literal
 - Capture and store full packet payloads for deeper protocol analysis
 - Add alerting (email/webhook) for high-frequency source IPs
 - Integrate with an ELK stack or Grafana for time-series visualization

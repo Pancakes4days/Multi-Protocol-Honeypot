@@ -158,14 +158,14 @@ def show_recent_connections(log_file, n=10):
         print("-" * 70)
 
 if __name__ == "__main__":
-    log_file = "logs/connections.jsonl"
-    
-    if len(sys.argv) > 1:
-        if sys.argv[1] == "recent":
-            n = int(sys.argv[2]) if len(sys.argv) > 2 else 10
-            show_recent_connections(log_file, n)
-        else:
-            log_file = sys.argv[1]
-            analyze_logs(log_file)
+    default_log = "logs/connections.jsonl"
+
+    if len(sys.argv) > 1 and sys.argv[1] == "recent":
+        # Usage: recent [count] [log_file]
+        n = int(sys.argv[2]) if len(sys.argv) > 2 else 10
+        log_file = sys.argv[3] if len(sys.argv) > 3 else default_log
+        show_recent_connections(log_file, n)
+    elif len(sys.argv) > 1:
+        analyze_logs(sys.argv[1])
     else:
-        analyze_logs(log_file)
+        analyze_logs(default_log)

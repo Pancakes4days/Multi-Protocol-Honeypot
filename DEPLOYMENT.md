@@ -1,3 +1,7 @@
+# Deployment Guide
+
+> For a project overview and architecture, see [README.md](README.md).
+
 ## Step-by-Step Commands to Run on VPS
 
 ### SSH into  VPS
@@ -51,6 +55,22 @@ docker logs -f minecraft-honeypot
 
 ---
 
+## Hardened Runtime (what to expect)
+
+The container is locked down on purpose — it deliberately attracts hostile traffic, so the blast radius of any bug is kept minimal:
+
+- Runs as a **non-root** `honeypot` user
+- **Read-only** root filesystem — the only writable paths are the mounted `logs/` volume and a small non-persistent `/tmp` tmpfs
+- **All Linux capabilities dropped** (`cap_drop: ALL`) with `no-new-privileges`
+- **Resource caps**: `mem_limit: 256m`, `pids_limit: 256`, `cpus: 0.5`
+- Handles connections **concurrently** (one thread each, capped at 200) so a slow/silent client can't stall the honeypot
+
+Implications for deployment:
+- Don't expect to write files anywhere inside the container except `/logs`. If you customize it to write elsewhere, add a `tmpfs` or volume — the root FS is immutable.
+- `docker stats` will show memory capped at ~256 MiB. If the container is OOM-killed under heavy load, raise `mem_limit` in `docker-compose.yml`.
+
+---
+
 ## Quick Commands Reference
 
 ### Viewing Logs
@@ -64,8 +84,9 @@ docker logs minecraft-honeypot --tail 50
 # Analyze statistics
 python3 analyze_logs.py
 
-# View recent connections
+# View recent connections (optionally from a specific log file)
 python3 analyze_logs.py recent 10
+python3 analyze_logs.py recent 10 logs/connections.jsonl
 ```
 
 ### Managing Honeypot
@@ -97,7 +118,7 @@ python3 attack_simulator.py YOUR_VPS_IP
 # Check if running
 docker ps | grep honeypot
 
-# Resource usage
+# Resource usage (memory is capped at ~256 MiB by mem_limit)
 docker stats minecraft-honeypot
 
 # Disk usage
@@ -151,6 +172,19 @@ docker-compose down
 docker system prune -a -f
 docker-compose build --no-cache
 docker-compose up -d
+```
+
+Note: the container runs with a **read-only root filesystem**. If you see
+"Read-only file system" errors, the process is trying to write outside the
+allowed paths (`/logs` and `/tmp`). Make sure the `logs/` volume exists and is
+writable on the host: `mkdir -p logs`.
+
+### Container gets OOM-killed / keeps restarting under load?
+The container is capped at `mem_limit: 256m`. Under an unusually heavy flood it
+may be killed and restarted. Raise the limit in `docker-compose.yml` and
+rebuild:
+```bash
+docker-compose down && docker-compose up -d
 ```
 
 ### No attacks yet?
