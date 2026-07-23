@@ -1,5 +1,5 @@
 #!/bin/bash
-# Quick setup script for Minecraft Honeypot on DigitalOcean VPS
+# Quick setup script for Minecraft Honeypot on a Hetzner Cloud VPS
 
 set -e  # Exit on any error
 
@@ -18,7 +18,7 @@ fi
 # Check if Docker is installed
 if ! command -v docker &> /dev/null; then
     echo "   Docker is not installed!"
-    echo "   Did you use the Docker marketplace image?"
+    echo "   Did you create the server from Hetzner's 'Docker CE' app image?"
     echo "   Or install Docker manually: curl -fsSL https://get.docker.com | sh"
     exit 1
 fi
@@ -26,14 +26,17 @@ fi
 echo " Docker is installed: $(docker --version)"
 echo ""
 
-# Check if docker-compose is available
-if ! command -v docker-compose &> /dev/null; then
-    echo "   Installing docker-compose..."
-    sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-    sudo chmod +x /usr/local/bin/docker-compose
+# Check that the Docker Compose v2 plugin is available (`docker compose`, with a
+# space). The old standalone `docker-compose` binary is deprecated and isn't in
+# Ubuntu's default repos; modern Docker ships Compose as a plugin. The Hetzner
+# "Docker CE" app image already includes it.
+if ! docker compose version &> /dev/null; then
+    echo "   Docker Compose plugin not found!"
+    echo "   Install it with: sudo apt update && sudo apt install -y docker-compose-plugin"
+    exit 1
 fi
 
-echo "   docker-compose is available: $(docker-compose --version)"
+echo "   Docker Compose is available: $(docker compose version)"
 echo ""
 
 # Create logs directory
@@ -42,15 +45,23 @@ mkdir -p logs
 echo "   Logs directory created"
 echo ""
 
+# Record this user's UID/GID so the container runs as you and can write to
+# ./logs. Written to .env, which docker compose reads automatically for every
+# subsequent command (up, restart, etc.).
+echo "   Configuring container user..."
+printf 'HONEYPOT_UID=%s\nHONEYPOT_GID=%s\n' "$(id -u)" "$(id -g)" > .env
+echo "   Container will run as UID:GID $(id -u):$(id -g)"
+echo ""
+
 # Build the honeypot
 echo "   Building honeypot Docker image..."
-docker-compose build
+docker compose build
 echo "   Image built successfully"
 echo ""
 
 # Start the honeypot
 echo "   Starting honeypot..."
-docker-compose up -d
+docker compose up -d
 echo "   Honeypot started!"
 echo ""
 
@@ -91,7 +102,7 @@ echo "   Test from your computer:"
 echo "   python3 attack_simulator.py $SERVER_IP"
 echo ""
 echo "   Stop the honeypot:"
-echo "   docker-compose down"
+echo "   docker compose down"
 echo ""
 echo "   More info: See README.md"
 echo ""

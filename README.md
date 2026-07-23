@@ -13,7 +13,7 @@ A Dockerized honeypot server that emulates a Minecraft game server to capture an
 
 ## Deployment
 
-> For a guided, script-driven setup (including a DigitalOcean walkthrough and `setup.sh`), see [DEPLOYMENT.md](DEPLOYMENT.md). The steps below are the manual equivalent.
+> For a guided, script-driven setup (including a Hetzner Cloud walkthrough and `setup.sh`), see [DEPLOYMENT.md](DEPLOYMENT.md). The steps below are the manual equivalent.
 
 ### 1. Transfer files to your VPS
 
@@ -25,8 +25,12 @@ scp analyze_logs.py attack_simulator.py honeypot@YOUR_VPS_IP:~/
 ### 2. Build and start
 
 ```bash
-docker-compose build
-docker-compose up -d
+# Record your uid/gid so the container can write to logs/ (setup.sh does this
+# for you). Skip only if your VPS user is uid 1000, the compose default.
+printf 'HONEYPOT_UID=%s\nHONEYPOT_GID=%s\n' "$(id -u)" "$(id -g)" > .env
+
+docker compose build
+docker compose up -d
 docker ps   # confirm the container is running
 ```
 
@@ -120,16 +124,16 @@ You can also connect with the real Minecraft client by adding `YOUR_VPS_IP:25565
 
 ```bash
 # Stop
-docker-compose down
+docker compose down
 
 # Restart
-docker-compose restart
+docker compose restart
 
 # Rebuild after code changes
-docker-compose down && docker-compose build && docker-compose up -d
+docker compose down && docker compose build && docker compose up -d
 
 # Clear logs (stop first)
-docker-compose down && rm -rf logs/* && docker-compose up -d
+docker compose down && rm -rf logs/* && docker compose up -d
 
 # Resource usage
 docker stats minecraft-honeypot
@@ -154,14 +158,14 @@ docker logs minecraft-honeypot     # inspect startup errors
 **Container restart loop**
 ```bash
 docker logs minecraft-honeypot --tail 100
-docker-compose down && docker-compose build --no-cache && docker-compose up -d
+docker compose down && docker compose build --no-cache && docker compose up -d
 ```
 
 ## Security Considerations
 
 Because the honeypot deliberately attracts hostile traffic, it is hardened to keep the blast radius of any bug as small as possible:
 
-- **Non-root process** — the container runs as an unprivileged `honeypot` user, not root
+- **Non-root process** — the container never runs as root. It runs as your unprivileged host user (uid/gid), which also keeps the bind-mounted `logs/` writable by both the container and you. `setup.sh` records your uid/gid in a `.env` file; without it the compose file defaults to `1000` (the typical first VPS user)
 - **Immutable root filesystem** — `read_only: true`; `logs/` is the only writable path (plus a small non-persistent `tmpfs` at `/tmp`)
 - **No Linux capabilities** — `cap_drop: ALL` with `no-new-privileges` to block setuid escalation
 - **Resource caps** — `mem_limit`, `pids_limit`, and `cpus` bound the container so a flood can't exhaust the host

@@ -4,6 +4,11 @@ services:
   honeypot:
     build: .
     container_name: minecraft-honeypot
+    # Run as the host user so the bind-mounted ./logs stays writable by both the
+    # container and you (no root, no chown dance). Defaults to 1000 (the typical
+    # first VPS user); setup.sh writes a .env with your actual uid/gid so manual
+    # docker-compose commands pick it up too.
+    user: "${HONEYPOT_UID:-1000}:${HONEYPOT_GID:-1000}"
     # Bind only the honeypot port. This is the single intended exposure.
     ports:
       - "25565:25565"
